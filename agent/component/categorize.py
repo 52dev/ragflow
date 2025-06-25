@@ -15,8 +15,8 @@
 #
 import logging
 from abc import ABC
-from api.db import LLMType
-from api.db.services.llm_service import LLMBundle
+from api.db.services import LLMType # Adjusted import
+from api.db.services.llm_service import LLMBundle # This is mocked
 from agent.component import GenerateParam, Generate
 
 

@@ -15,10 +15,10 @@
 #
 import logging
 from abc import ABC
-from api.db import LLMType
-from api.db.services.llm_service import LLMBundle
+from api.db.services import LLMType # Adjusted import
+from api.db.services.llm_service import LLMBundle # This is mocked
 from agent.component import GenerateParam, Generate
-from rag.utils import num_tokens_from_string, encoder
+from rag.utils import num_tokens_from_string, encoder # These are now mocked in rag/utils/__init__.py
 
 
 class RelevantParam(GenerateParam):

@@ -35,6 +35,11 @@ class ComponentParamBase(ABC):
     def __init__(self):
         self.output_var_name = "output"
         self.infor_var_name = "infor"
+        # Initialize the actual output attribute to None by default
+        setattr(self, self.output_var_name, None)
+        # Initialize the actual infor attribute to None by default (if a similar pattern is needed for infor)
+        # setattr(self, self.infor_var_name, None) # Not strictly needed by current error, but good for consistency if used similarly
+
         self.message_history_window_size = 22
         self.query = []
         self.inputs = []

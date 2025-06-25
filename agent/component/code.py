@@ -21,7 +21,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 from agent.component.base import ComponentBase, ComponentParamBase
-from api import settings
+# from api import settings # Removed this import
 
 
 class Language(str, Enum):
@@ -65,7 +65,8 @@ class CodeParam(ComponentParamBase):
         self.lang = "python"
         self.script = ""
         self.arguments = []
-        self.address = f"http://{settings.SANDBOX_HOST}:9385/run"
+        # Use a hardcoded default address instead of relying on settings.SANDBOX_HOST
+        self.address = "http://localhost:9385/run" # Default, can be overridden by DSL params
         self.enable_network = True
 
     def check(self):

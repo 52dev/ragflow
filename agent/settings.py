@@ -16,3 +16,4 @@
 
 FLOAT_ZERO = 1e-8
 PARAM_MAXDEPTH = 5
+DEBUG = False # Default DEBUG setting
