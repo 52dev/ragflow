@@ -24,9 +24,9 @@ from api.db.services.conversation_service import structure_answer
 from api.db.services.llm_service import LLMBundle
 # from api import settings # settings.retrievaler will be stubbed or removed
 from agent.component.base import ComponentBase, ComponentParamBase
-from plugin import GlobalPluginManager # This is now mocked
-from plugin.llm_tool_plugin import llm_tool_metadata_to_openai_tool # This is now mocked
-from rag.llm.chat_model import ToolCallSession # This is now mocked
+# from plugin import GlobalPluginManager # Removed
+# from plugin.llm_tool_plugin import llm_tool_metadata_to_openai_tool # Removed
+# from rag.llm.chat_model import ToolCallSession # ToolCallSession was used by LLMToolPluginCallSession, removing if not used elsewhere
 from rag.prompts import message_fit_in # This is now mocked
 
 # Mock for settings.retrievaler (specifically for insert_citations)
@@ -46,16 +46,14 @@ class SettingsMockGenerate:
 
 settings = SettingsMockGenerate()
 
-
-class LLMToolPluginCallSession(ToolCallSession):
-    def tool_call(self, name: str, arguments: dict[str, Any]) -> str:
-        tool = GlobalPluginManager.get_llm_tool_by_name(name)
-
-        if tool is None:
-            raise ValueError(f"LLM tool {name} does not exist")
-
-        return tool().invoke(**arguments)
-
+# class LLMToolPluginCallSession(ToolCallSession): # Removed as plugin system is being removed
+#     def tool_call(self, name: str, arguments: dict[str, Any]) -> str:
+#         tool = GlobalPluginManager.get_llm_tool_by_name(name)
+#
+#         if tool is None:
+#             raise ValueError(f"LLM tool {name} does not exist")
+#
+#         return tool().invoke(**arguments)
 
 class GenerateParam(ComponentParamBase):
     """
@@ -210,16 +208,17 @@ class Generate(ComponentBase):
     def _run(self, history, **kwargs):
         chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT, self._param.llm_id) # LLMBundle is mocked
 
-        if len(self._param.llm_enabled_tools) > 0:
-            # GlobalPluginManager and llm_tool_metadata_to_openai_tool are mocked
-            tools = GlobalPluginManager.get_llm_tools_by_names(self._param.llm_enabled_tools)
-            if tools: # Only bind if tools are actually found/mocked
-                chat_mdl.bind_tools( # bind_tools on MockLLMBundle does nothing but print
-                    LLMToolPluginCallSession(), # This is the original class, but uses mocked GlobalPluginManager
-                    [llm_tool_metadata_to_openai_tool(t.get_metadata()) for t in tools]
-                )
-            else:
-                logging.warning(f"LLM tools {self._param.llm_enabled_tools} configured but not found by mock GlobalPluginManager.")
+        # if len(self._param.llm_enabled_tools) > 0: # Removed plugin logic
+            # tools = GlobalPluginManager.get_llm_tools_by_names(self._param.llm_enabled_tools)
+            # if tools:
+            #     chat_mdl.bind_tools(
+            #         LLMToolPluginCallSession(),
+            #         [llm_tool_metadata_to_openai_tool(t.get_metadata()) for t in tools]
+            #     )
+            # else:
+            #     logging.warning(f"LLM tools {self._param.llm_enabled_tools} configured but not found by mock GlobalPluginManager.")
+        if self._param.llm_enabled_tools:
+            logging.warning("LLM tools are configured but plugin system has been removed. Tools will not be used.")
 
         prompt = self._param.prompt
 
