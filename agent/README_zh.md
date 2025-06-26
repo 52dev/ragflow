@@ -438,4 +438,77 @@ print(dsl_json)
 ```
 此API提供了一种更结构化的方式来生成复杂的DSL，特别适用于动态工作流生成或集成到其他Python应用程序中。
 *(Machine translation for: This API provides a more structured way to generate complex DSLs, especially useful for dynamic workflow generation or integration into other Python applications.)*
+
+## 工作流 API 服务器 (FastAPI) (Workflow API Server (FastAPI))
+
+`agent/api_server.py`中提供了一个FastAPI服务器，用于以编程方式管理工作流DSL。这允许通过HTTP API端点创建、检索、更新、删除和列出工作流。工作流目前存储在内存中，服务器停止时将丢失。
+*(Machine translation for: A FastAPI server is provided in `agent/api_server.py` to manage workflow DSLs programmatically. This allows for creating, retrieving, updating, deleting, and listing workflows via HTTP API endpoints. Workflows are currently stored in memory and will be lost when the server stops.)*
+
+*(以下中文描述为英文内容的直接复制，需要人工翻译。代码示例和参数名保留英文。)*
+*(Machine translation for: The following Chinese descriptions are direct copies of the English content and require manual translation. Code examples and parameter names are kept in English.)*
+
+### 运行 API 服务器 (Running the API Server)
+
+Ensure you have installed dependencies with Poetry (`poetry install`). You can run the server using Uvicorn:
+
+```bash
+uvicorn agent.api_server:app --reload --host 0.0.0.0 --port 8000
+```
+The API documentation (Swagger UI) will be available at `http://localhost:8000/docs`.
+
+### API 端点 (API Endpoints)
+
+*   **`POST /workflows`**: Creates a new workflow.
+    *   **Request Body:** JSON object with `name` (optional string), `description` (optional string), and `dsl` (workflow DSL object).
+    *   **Response:** JSON object with `workflow_id`, `name`, `description`, and `dsl`.
+*   **`GET /workflows`**: Lists all currently stored workflows.
+    *   **Response:** JSON array of objects, each with `workflow_id`, `name`, and `description`.
+*   **`GET /workflows/{workflow_id}`**: Retrieves a specific workflow by its ID.
+    *   **Response:** JSON object with `workflow_id`, `name`, `description`, and `dsl`. Returns 404 if not found.
+*   **`PUT /workflows/{workflow_id}`**: Updates an existing workflow.
+    *   **Request Body:** JSON object with `name` (optional string), `description` (optional string), and `dsl` (workflow DSL object).
+    *   **Response:** JSON object with `workflow_id`, `name`, `description`, and `dsl`. Returns 404 if not found.
+*   **`DELETE /workflows/{workflow_id}`**: Deletes a workflow by its ID.
+    *   **Response:** 204 No Content on success. Returns 404 if not found.
+*   **`GET /components`**: Lists all available component names that can be used in workflows.
+    *   **Response:** JSON array of objects, each with `name` (string).
+
+### `curl` 用法示例 (Example `curl` Usage):
+
+**1. 创建工作流 (Create a workflow):**
+```bash
+curl -X POST "http://localhost:8000/workflows" -H "Content-Type: application/json" -d \
+'{
+  "name": "My Test Workflow",
+  "description": "A simple test workflow created via API",
+  "dsl": {
+    "components": {
+      "begin": {
+        "obj": {"component_name": "Begin", "params": {"prologue": "Hello from API!"}},
+        "downstream": ["answer_out"], "upstream": []
+      },
+      "answer_out": {
+        "obj": {"component_name": "Answer", "params": {}},
+        "downstream": [], "upstream": ["begin"]
+      }
+    },
+    "history": [], "messages": [], "reference": [], "path": [], "answer": []
+  }
+}'
+```
+
+**2. 列出工作流 (List workflows):**
+```bash
+curl -X GET "http://localhost:8000/workflows"
+```
+
+**3. 获取特定工作流 (Get a specific workflow) (将 `{workflow_id}` 替换为实际ID):**
+```bash
+curl -X GET "http://localhost:8000/workflows/{workflow_id}"
+```
+
+**4. 列出可用组件 (List available components):**
+```bash
+curl -X GET "http://localhost:8000/components"
+```
 *(Machine translation for: Further details on specific component parameters and advanced usage can be found by examining the component's source code in `agent/component/` and its corresponding parameter class (e.g., `GenerateParam` for `Generate`).)*

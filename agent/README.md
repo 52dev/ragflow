@@ -421,3 +421,72 @@ dsl_json = wf.to_dsl_json()
 print(dsl_json)
 ```
 This API provides a more structured way to generate complex DSLs, especially useful for dynamic workflow generation or integration into other Python applications.
+
+## Workflow API Server (FastAPI)
+
+A FastAPI server is provided in `agent/api_server.py` to manage workflow DSLs programmatically. This allows for creating, retrieving, updating, deleting, and listing workflows via HTTP API endpoints. Workflows are currently stored in memory and will be lost when the server stops.
+
+### Running the API Server
+
+Ensure you have installed dependencies with Poetry (`poetry install`). You can run the server using Uvicorn:
+
+```bash
+uvicorn agent.api_server:app --reload --host 0.0.0.0 --port 8000
+```
+The API documentation (Swagger UI) will be available at `http://localhost:8000/docs`.
+
+### API Endpoints
+
+*   **`POST /workflows`**: Creates a new workflow.
+    *   **Request Body:** JSON object with `name` (optional string), `description` (optional string), and `dsl` (workflow DSL object).
+    *   **Response:** JSON object with `workflow_id`, `name`, `description`, and `dsl`.
+*   **`GET /workflows`**: Lists all currently stored workflows.
+    *   **Response:** JSON array of objects, each with `workflow_id`, `name`, and `description`.
+*   **`GET /workflows/{workflow_id}`**: Retrieves a specific workflow by its ID.
+    *   **Response:** JSON object with `workflow_id`, `name`, `description`, and `dsl`. Returns 404 if not found.
+*   **`PUT /workflows/{workflow_id}`**: Updates an existing workflow.
+    *   **Request Body:** JSON object with `name` (optional string), `description` (optional string), and `dsl` (workflow DSL object).
+    *   **Response:** JSON object with `workflow_id`, `name`, `description`, and `dsl`. Returns 404 if not found.
+*   **`DELETE /workflows/{workflow_id}`**: Deletes a workflow by its ID.
+    *   **Response:** 204 No Content on success. Returns 404 if not found.
+*   **`GET /components`**: Lists all available component names that can be used in workflows.
+    *   **Response:** JSON array of objects, each with `name` (string).
+
+### Example `curl` Usage:
+
+**1. Create a workflow:**
+```bash
+curl -X POST "http://localhost:8000/workflows" -H "Content-Type: application/json" -d \
+'{
+  "name": "My Test Workflow",
+  "description": "A simple test workflow created via API",
+  "dsl": {
+    "components": {
+      "begin": {
+        "obj": {"component_name": "Begin", "params": {"prologue": "Hello from API!"}},
+        "downstream": ["answer_out"], "upstream": []
+      },
+      "answer_out": {
+        "obj": {"component_name": "Answer", "params": {}},
+        "downstream": [], "upstream": ["begin"]
+      }
+    },
+    "history": [], "messages": [], "reference": [], "path": [], "answer": []
+  }
+}'
+```
+
+**2. List workflows:**
+```bash
+curl -X GET "http://localhost:8000/workflows"
+```
+
+**3. Get a specific workflow (replace `{workflow_id}` with an actual ID from the POST response):**
+```bash
+curl -X GET "http://localhost:8000/workflows/{workflow_id}"
+```
+
+**4. List available components:**
+```bash
+curl -X GET "http://localhost:8000/components"
+```
