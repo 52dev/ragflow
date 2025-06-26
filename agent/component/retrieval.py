@@ -25,9 +25,9 @@ from api.db.services import LLMType # Adjusted import
 from api.db.services.llm_service import LLMBundle # Mocked
 # from api import settings # settings.retrievaler and settings.kg_retrievaler will be stubbed or removed
 from agent.component.base import ComponentBase, ComponentParamBase
-from rag.app.tag import label_question
-from rag.prompts import kb_prompt
-from rag.utils.tavily_conn import Tavily
+# from rag.app.tag import label_question # Removed
+# from rag.prompts import kb_prompt # Removed
+# from rag.utils.tavily_conn import Tavily # Removed import, will define mock locally
 
 # MockRetriever and SettingsMock are no longer needed as DB-specific retrieval path is removed.
 # settings = SettingsMock() # Removed
@@ -78,6 +78,30 @@ class Retrieval(ComponentBase, ABC):
     Database-backed knowledge base retrieval has been removed.
     """
     component_name = "Retrieval"
+
+    # --- Start of Local Mock Tavily Class ---
+    class _MockTavily:
+        def __init__(self, api_key: str):
+            logging.info(f"Local MockTavily initialized with api_key='{api_key[:5]}...'")
+            self.api_key = api_key
+
+        def retrieve_chunks(self, query: str, max_results: int = 5):
+            logging.info(f"Local MockTavily.retrieve_chunks called for query='{query}', max_results={max_results}")
+            dummy_chunks = []
+            dummy_doc_aggs = []
+            for i in range(min(max_results, 2)):
+                dummy_chunks.append({
+                    "content": f"Mocked Tavily content for '{query}' - chunk {i+1}",
+                    "source": f"dummy_tavily_source_{i+1}.com",
+                    "doc_id": f"tavily_doc_{i+1}",
+                    "docnm_kwd": f"Mock Tavily Doc {i+1}"
+                })
+                dummy_doc_aggs.append({
+                    "doc_id": f"tavily_doc_{i+1}",
+                    "doc_name": f"Mock Tavily Doc {i+1}"
+                })
+            return {"chunks": dummy_chunks, "doc_aggs": dummy_doc_aggs}
+    # --- End of Local Mock Tavily Class ---
 
     def _run(self, history, **kwargs):
         """
@@ -138,7 +162,7 @@ class Retrieval(ComponentBase, ABC):
         # Tavily is the primary remaining retrieval source
         if self._param.tavily_api_key:
             logging.info(f"Retrieval component: Attempting retrieval via Tavily for query: {query}")
-            tav = Tavily(self._param.tavily_api_key) # Tavily mock is used
+            tav = self._MockTavily(self._param.tavily_api_key) # Use local mock
             try:
                 tav_res = tav.retrieve_chunks(query, max_results=self._param.top_n)
                 kbinfos["chunks"].extend(tav_res.get("chunks", []))
@@ -180,13 +204,21 @@ class Retrieval(ComponentBase, ABC):
                 serializable_chunks.append({"content": str(chunk)})
 
 
-        # Ensure kb_prompt gets what it expects. Our mock kb_prompt is simple.
-        # The kb_prompt will be based on Tavily results or KG mock results.
-        prompt_content = kb_prompt({"chunks": serializable_chunks, "doc_aggs": kbinfos.get("doc_aggs", [])}, 200000)
+        # Instead of calling kb_prompt, directly construct the content string
+        # by concatenating the 'content' field of each chunk.
+        if serializable_chunks:
+            # Join content of all chunks, each on a new line, prefixed for clarity
+            prompt_content = "Retrieved information:\n" + "\n".join(
+                [f"- {str(chunk.get('content', ''))}" for chunk in serializable_chunks if chunk.get('content')]
+            )
+        else:
+            # This case should ideally be caught by the `if not kbinfos["chunks"]` check earlier,
+            # but as a fallback, if serializable_chunks ends up empty here.
+            prompt_content = self._param.empty_response if self._param.empty_response and self._param.empty_response.strip() else "No information retrieved."
 
         df = pd.DataFrame({"content": prompt_content, "chunks": json.dumps(serializable_chunks)})
         logging.debug(f"Retrieval component for query '{query}' output: {df.to_string()}")
-        # Stray lines removed here & redundant block below is removed.
+        # Redundant block removal confirmed in previous step.
 
         # The following block was identified as redundant because the case of no chunks
         # is already handled by the "No chunks found from any source" check further up.

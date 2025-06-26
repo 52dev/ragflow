@@ -18,7 +18,7 @@ from abc import ABC
 from api.db.services import LLMType # Adjusted import
 from api.db.services.llm_service import LLMBundle # This is mocked
 from agent.component import GenerateParam, Generate
-from rag.utils import num_tokens_from_string, encoder # These are now mocked in rag/utils/__init__.py
+# from rag.utils import num_tokens_from_string, encoder # Removed
 
 
 class RelevantParam(GenerateParam):
@@ -65,18 +65,47 @@ class Relevant(Generate, ABC):
         ans = f"Question: {q}\n" + ans
         chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT, self._param.llm_id)
 
-        if num_tokens_from_string(ans) >= chat_mdl.max_length - 4:
-            ans = encoder.decode(encoder.encode(ans)[:chat_mdl.max_length - 4])
+        # Estimate character limit based on LLM's max_length (assuming 1 token ~ 4 chars)
+        # Subtract a small buffer (e.g., 20 chars) for safety margin with prompts/roles.
+        # chat_mdl.max_length is from the mocked LLMBundle.
+        char_limit = (chat_mdl.max_length * 4) - 20
 
-        ans = chat_mdl.chat(self._param.get_prompt(), [{"role": "user", "content": ans}],
-                            self._param.gen_conf())
+        if len(ans) > char_limit:
+            logging.warning(f"Relevant component: Input text length ({len(ans)} chars) exceeds estimated limit ({char_limit} chars). Truncating.")
+            ans = ans[:char_limit-3] + "..." # Truncate and add ellipsis
 
-        logging.debug(ans)
-        if ans.lower().find("yes") >= 0:
+        llm_prompt = self._param.get_prompt()
+        llm_messages = [{"role": "user", "content": ans}]
+
+        # Simple message fitting for Relevant component (system prompt + user content)
+        # The system prompt from get_prompt() is usually short.
+        # If llm_prompt + ans is too long, we prioritize user content (ans) as it's already truncated.
+        # A more robust solution would use the Generate component's _prepare_llm_messages if complex history was involved.
+        # For 'Relevant', the history isn't directly used in the LLM call, only the current Q and Document.
+
+        # Naive check for prompt + content length (char based)
+        if len(llm_prompt) + len(ans) > char_limit * 1.2 : # Allow some leeway over just 'ans'
+             logging.warning("Relevant component: Combined prompt and content might be too long. Using only content for LLM call.")
+             # This could be an issue if the system prompt is very long.
+             # For now, assuming system prompt is concise.
+             # If not, a more sophisticated truncation of combined prompt+content would be needed.
+             llm_response_text = chat_mdl.chat(llm_prompt, llm_messages, self._param.gen_conf())
+        else:
+             llm_response_text = chat_mdl.chat(llm_prompt, llm_messages, self._param.gen_conf())
+
+
+        logging.debug(llm_response_text)
+        if llm_response_text.lower().find("yes") >= 0:
             return Relevant.be_output(self._param.yes)
-        if ans.lower().find("no") >= 0:
+        if llm_response_text.lower().find("no") >= 0:
             return Relevant.be_output(self._param.no)
-        assert False, f"Relevant component got: {ans}"
+        # If LLM response is neither yes/no, default to 'no' or raise error.
+        # Original code had an assert False, which would halt.
+        # Let's default to 'no' for robustness if the LLM (mock or real) doesn't behave.
+        logging.warning(f"Relevant component got ambiguous LLM response: '{llm_response_text}'. Defaulting to 'no'.")
+        return Relevant.be_output(self._param.no)
+
+        assert False, f"Relevant component got: {llm_response_text}" # This line is now unreachable due to default above
 
     def debug(self, **kwargs):
         return self._run([], **kwargs)

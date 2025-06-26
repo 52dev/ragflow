@@ -27,7 +27,7 @@ from agent.component.base import ComponentBase, ComponentParamBase
 # from plugin import GlobalPluginManager # Removed
 # from plugin.llm_tool_plugin import llm_tool_metadata_to_openai_tool # Removed
 # from rag.llm.chat_model import ToolCallSession # ToolCallSession was used by LLMToolPluginCallSession, removing if not used elsewhere
-from rag.prompts import message_fit_in # This is now mocked
+# from rag.prompts import message_fit_in # Removed, will be replaced by local implementation
 
 # Mock for settings.retrievaler (specifically for insert_citations)
 class MockRetrieverForCite:
@@ -188,6 +188,89 @@ class Generate(ComponentBase):
                 prompt = re.sub(r"\{input\}", "", prompt) # Replace with empty if no content
         return prompt
 
+    def _truncate_messages_to_fit_token_limit(self, messages: list[dict[str, Any]], max_token_length: int) -> tuple[int, list[dict[str, Any]]]:
+        """
+        Truncates a list of messages to fit within a specified maximum token length.
+        A simple implementation using character count as a proxy for tokens.
+        Keeps system message and prioritizes recent messages.
+        Roughly assumes 1 token ~ 4 characters for estimation.
+        """
+        # max_char_length is a rough estimation. A real tokenizer would be more accurate.
+        # This factor (4) might need adjustment based on typical tokenization of the target LLM.
+        max_char_length = max_token_length * 4
+        current_char_length = 0
+        fitted_messages = []
+
+        system_message = None
+        # Separate system message to ensure it's prioritized if possible
+        if messages and messages[0].get("role") == "system":
+            system_message = messages[0]
+            messages = messages[1:] # History messages to be processed
+
+        # Process history messages from most recent (end of list)
+        for msg in reversed(messages):
+            msg_role = str(msg.get("role", "user")) # Default to user if role missing
+            msg_content = str(msg.get("content", ""))
+            # Estimate length: content + role label + basic formatting overhead
+            msg_len = len(msg_content) + len(msg_role) + 5 # Rough overhead for "role: content\n"
+
+            if current_char_length + msg_len <= max_char_length:
+                fitted_messages.insert(0, msg) # Add to the beginning to maintain original order
+                current_char_length += msg_len
+            else:
+                # If this message alone (even if it's the first one we check from history) is too long
+                if not fitted_messages and msg_len > max_char_length :
+                    available_chars_for_content = max_char_length - (len(msg_role) + 5)
+                    if available_chars_for_content > 20: # Only add if we can keep a meaningful part
+                        truncated_content = msg_content[:available_chars_for_content - 3] + "..."
+                        fitted_messages.insert(0, {"role": msg_role, "content": truncated_content})
+                        current_char_length += len(truncated_content) + len(msg_role) + 5
+                break # Stop adding more (older) messages
+
+        # Try to add the system message at the beginning
+        if system_message:
+            system_content = str(system_message.get("content", ""))
+            system_role = str(system_message.get("role", "system"))
+            system_len = len(system_content) + len(system_role) + 5
+
+            # If system message fits with current history, add it
+            if current_char_length + system_len <= max_char_length:
+                fitted_messages.insert(0, system_message)
+                current_char_length += system_len
+            else:
+                # Try to make space for system message by removing oldest history messages
+                while current_char_length + system_len > max_char_length and fitted_messages:
+                    removed_msg = fitted_messages.pop(0) # Remove from the start (oldest history)
+                    current_char_length -= (len(str(removed_msg.get("content",""))) + len(str(removed_msg.get("role","user")))+5)
+
+                # If space was made, or if system message alone fits
+                if current_char_length + system_len <= max_char_length:
+                    fitted_messages.insert(0, system_message)
+                    current_char_length += system_len
+                elif system_len <= max_char_length: # Only system message fits, history is emptied
+                    fitted_messages = [system_message]
+                    current_char_length = system_len
+                else: # System message itself is too long, try to truncate it
+                    available_chars_for_content = max_char_length - (len(system_role) + 5)
+                    if available_chars_for_content > 20:
+                        truncated_content = system_content[:available_chars_for_content-3] + "..."
+                        fitted_messages = [{"role": system_role, "content": truncated_content}]
+                        current_char_length = len(truncated_content) + len(system_role) + 5
+                    else: # Cannot even fit a meaningful part of system message
+                        logging.warning("System message is too long to fit, even when truncated. Proceeding without system message.")
+                        # fitted_messages remains as it was (potentially empty or just history)
+                        pass
+
+        # Final check: if fitted_messages is empty, ensure a default user prompt
+        if not fitted_messages:
+            logging.warning("Message fitting resulted in an empty message list. Using a default user prompt.")
+            fitted_messages = [{"role": "user", "content": "Please provide a response."}]
+            current_char_length = len("Please provide a response.") + len("user") + 5
+
+        # Return estimated token count (very rough) and the list of messages
+        return current_char_length // 4, fitted_messages
+
+
     def _prepare_llm_messages(self, system_prompt_str: str, chat_model_max_length: int) -> tuple[str, list[dict[str, Any]]]:
         """
         Prepares the system prompt and message list for the LLM call,
@@ -211,12 +294,14 @@ class Generate(ComponentBase):
             elif not messages_to_fit:
                  messages_to_fit = [{"role": "user", "content": "Output: "}]
 
-        # Fit messages into token limit (message_fit_in is mocked)
-        # The mock LLMBundle has a max_length attribute.
-        _, fitted_messages = message_fit_in(messages_to_fit, int(chat_model_max_length * 0.97))
+        # Fit messages into token limit using new internal method
+        _, fitted_messages = self._truncate_messages_to_fit_token_limit(messages_to_fit, int(chat_model_max_length * 0.97))
 
-        # Fallback if fitting results in empty messages (should be handled by message_fit_in ideally)
+        # Fallback if fitting results in empty messages
         if not fitted_messages:
+            # This fallback should ideally be handled within _truncate_messages_to_fit_token_limit
+            # or ensure it always returns at least a minimal valid message list.
+            # For now, keeping this explicit fallback.
             fitted_messages = [{"role": "user", "content": "Output: "}]
 
         # Separate system prompt from chat history for the LLM

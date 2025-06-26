@@ -13,9 +13,10 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import logging # Added for logging
 from abc import ABC
 from agent.component import GenerateParam, Generate
-from rag.prompts import full_question
+# from rag.prompts import full_question # Removed
 
 
 class RewriteQuestionParam(GenerateParam):
@@ -38,14 +39,40 @@ class RewriteQuestion(Generate, ABC):
 
     def _run(self, history, **kwargs):
         hist = self._canvas.get_history(self._param.message_history_window_size)
-        query = self.get_input()
-        query = str(query["content"][0]) if "content" in query else ""
-        messages = [h for h in hist if h["role"]!="system"]
-        if messages[-1]["role"] != "user":
-            messages.append({"role": "user", "content": query})
-        ans = full_question(self._canvas.get_tenant_id(), self._param.llm_id, messages, self.gen_lang(self._param.language))
-        self._canvas.history.pop()
-        self._canvas.history.append(("user", ans))
+        # hist = self._canvas.get_history(self._param.message_history_window_size) # History not needed if not rewriting
+        query_df = self.get_input()
+        original_query = str(query_df["content"][0]) if "content" in query_df and not query_df.empty else ""
+
+        # messages = [h for h in hist if h["role"]!="system"]
+        # if messages and messages[-1]["role"] != "user": # Ensure last message is user, if history is used
+        #     messages.append({"role": "user", "content": original_query})
+        # elif not messages: # If no history, start with user query
+        #     messages = [{"role": "user", "content": original_query}]
+
+        # ans = full_question(self._canvas.get_tenant_id(), self._param.llm_id, messages, self.gen_lang(self._param.language)) # Removed call to full_question
+
+        # Since full_question (which was a RAG-dependent mock) is removed,
+        # this component will now be inert or act as a pass-through.
+        # We will return the original query.
+        ans = original_query
+        logging.info("RewriteQuestion component: RAG-based full_question functionality removed. Passing through original query.")
+
+        # The original component modified the canvas history with the rewritten question.
+        # Since no rewriting happens, this could be debated:
+        # 1. Don't modify history: The original user input remains the last user input.
+        # 2. Modify history with the same input: This maintains the pattern of this node updating history,
+        #    even if it's a no-op rewrite. This seems safer if downstream components expect history to be updated by this node.
+        # Let's go with option 2 for now to minimize disruption to flow assumptions,
+        # though it's effectively a no-op on the content itself.
+        if self._canvas.history and self._canvas.history[-1] == ("user", original_query):
+            # If the last history item is already this exact query, no need to pop and append.
+            pass
+        elif self._canvas.history and self._canvas.history[-1][0] == "user": # If last was user but different content
+            self._canvas.history.pop()
+            self._canvas.history.append(("user", ans))
+        else: # Last was not user, or history empty
+             self._canvas.history.append(("user", ans))
+
         return RewriteQuestion.be_output(ans)
 
     @staticmethod
