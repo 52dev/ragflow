@@ -193,3 +193,23 @@ dist
 # SvelteKit build / generate output
 .svelte-kit
 
+
+# Python / Poetry
+# Virtual environments
+.venv/
+venv/
+env/
+# Bytecode
+*.pyc
+# Build artifacts
+build/
+dist/
+*.egg-info/
+# Coverage reports
+.coverage
+# Poetry cache (though usually in user home, can sometimes be local)
+.poetry/
+# poetry.lock should NOT be ignored, it is committed.
+# If there was a broad rule like '*.lock' that accidentally caught it,
+# you would add:
+# !poetry.lock
