@@ -17,7 +17,8 @@ import json
 import re
 from abc import ABC
 import requests
-from deepdoc.parser import HtmlParser
+from bs4 import BeautifulSoup # Added
+# from deepdoc.parser import HtmlParser # Removed
 from agent.component.base import ComponentBase, ComponentParamBase
 
 
@@ -90,8 +91,9 @@ class Invoke(ComponentBase, ABC):
                                     proxies=proxies,
                                     timeout=self._param.timeout)
             if self._param.clean_html:
-                sections = HtmlParser()(None, response.content)
-                return Invoke.be_output("\n".join(sections))
+                soup = BeautifulSoup(response.content, "html.parser")
+                cleaned_text = soup.get_text(separator='\n', strip=True)
+                return Invoke.be_output(cleaned_text)
 
             return Invoke.be_output(response.text)
 
@@ -109,8 +111,9 @@ class Invoke(ComponentBase, ABC):
                                         proxies=proxies,
                                         timeout=self._param.timeout)
             if self._param.clean_html:
-                sections = HtmlParser()(None, response.content)
-                return Invoke.be_output("\n".join(sections))
+                soup = BeautifulSoup(response.content, "html.parser")
+                cleaned_text = soup.get_text(separator='\n', strip=True)
+                return Invoke.be_output(cleaned_text)
             return Invoke.be_output(response.text)
 
         if method == 'post':
@@ -127,6 +130,7 @@ class Invoke(ComponentBase, ABC):
                                          proxies=proxies,
                                          timeout=self._param.timeout)
             if self._param.clean_html:
-                sections = HtmlParser()(None, response.content)
-                return Invoke.be_output("\n".join(sections))
+                soup = BeautifulSoup(response.content, "html.parser")
+                cleaned_text = soup.get_text(separator='\n', strip=True)
+                return Invoke.be_output(cleaned_text)
             return Invoke.be_output(response.text)
