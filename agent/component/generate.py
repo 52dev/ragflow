@@ -70,7 +70,7 @@ class GenerateParam(ComponentParamBase):
         self.presence_penalty = 0
         self.frequency_penalty = 0
         self.cite = True
-        self.parameters = []
+        # self.parameters = [] # Removed unused parameter
         self.llm_enabled_tools = []
 
     def check(self):
@@ -98,19 +98,156 @@ class GenerateParam(ComponentParamBase):
 
 
 class Generate(ComponentBase):
+    """
+    The Generate component interacts with a Language Model (LLM) to generate text
+    based on a given prompt template and context from other components or history.
+    It can also handle citations if provided with retrieval results.
+    """
     component_name = "Generate"
 
     def get_dependent_components(self):
+        """
+        Determines dependent components based on variables in the prompt template.
+        """
         inputs = self.get_input_elements()
+        # Exclude 'answer' and 'begin' components from explicit dependencies if they are special keywords
         cpnts = set([i["key"] for i in inputs[1:] if i["key"].lower().find("answer") < 0 and i["key"].lower().find("begin") < 0])
         return list(cpnts)
 
-    def set_cite(self, retrieval_res, answer):
-        # retrieval_res is a DataFrame. Ensure "chunks" column exists and has valid JSON.
-        if "chunks" not in retrieval_res.columns or retrieval_res.empty or not retrieval_res["chunks"].iloc[0]:
-            logging.warning("No chunks found in retrieval_res for citation.")
+    def _get_prompt_inputs(self, current_kwargs: dict) -> tuple[dict, list[pd.DataFrame]]:
+        """
+        Fetches inputs from dependent components as specified in the prompt
+        template's input elements. Updates self._param.inputs.
+
+        :param current_kwargs: Dictionary to be populated with fetched input values.
+                               This dict is modified in place.
+        :return: A tuple containing the populated current_kwargs and a list of retrieval result DataFrames.
+        """
+        retrieval_results_dfs = []
+        self._param.inputs = [] # Clear previous inputs logged in params
+
+        # Iterate through input elements identified from the prompt template
+        # Skip the first one if it's the generic "user input" placeholder, actual inputs start from index 1.
+        for para_spec in self.get_input_elements()[1:]:
+            component_key = para_spec["key"]
+            input_content_str = "" # Default to empty string
+
+            if component_key.lower().find("begin@") == 0: # Input from Begin node's parameters
+                cpn_id, key_in_begin = component_key.split("@", 1)
+                begin_cpn_obj = self._canvas.get_component(cpn_id)["obj"]
+                # Assuming BeginParam stores its queryable parameters in a list of dicts called 'query'
+                found_param = False
+                for p_query_item in begin_cpn_obj._param.query:
+                    if p_query_item.get("key") == key_in_begin:
+                        input_content_str = p_query_item.get("value", "")
+                        found_param = True
+                        break
+                if not found_param:
+                    logging.warning(f"Could not find parameter '{key_in_begin}' in Begin component '{cpn_id}' for prompt variable '{component_key}'. Using empty string.")
+
+            else: # Input from a standard component's output
+                component_obj = self._canvas.get_component(component_key)["obj"]
+                if component_obj.component_name.lower() == "answer": # Special case for "answer" component (current user input/history)
+                    history_list = self._canvas.get_history(1) # Get latest history entry
+                    input_content_str = history_list[0]["content"] if history_list else ""
+                else: # Output from other components
+                    _, output_df = component_obj.output(allow_partial=False)
+                    if "content" not in output_df.columns or output_df.empty:
+                        input_content_str = ""
+                    else:
+                        # Consolidate potentially multiple rows of content into a single string
+                        input_content_str = "  - " + "\n  - ".join([str(o) for o in output_df["content"].dropna()])
+                        if component_obj.component_name.lower() == "retrieval":
+                            retrieval_results_dfs.append(output_df)
+
+            current_kwargs[component_key] = input_content_str # Populate the dictionary passed in
+            self._param.inputs.append({"component_id": component_key, "content": input_content_str})
+
+        return current_kwargs, retrieval_results_dfs
+
+    def _substitute_prompt_variables(self, prompt_template: str, prompt_vars: dict) -> str:
+        """
+        Substitutes variables in the prompt template with their fetched values.
+        Also handles a generic {input} placeholder.
+        """
+        prompt = prompt_template
+        for var_name, var_value in prompt_vars.items():
+            # Escape regex special characters in var_name for re.sub
+            # Also ensure var_value is a string and its backslashes are handled.
+            prompt = re.sub(r"\{%s\}" % re.escape(var_name), str(var_value).replace("\\", r"\\"), prompt)
+
+        # Fallback for a generic {input} placeholder if it wasn't in prompt_vars (e.g. not in get_input_elements)
+        # This typically means it should take its input from the single, direct upstream non-control component.
+        if "{input}" in prompt and "input" not in prompt_vars:
+            # self.get_input() is from ComponentBase, gets data from immediate upstream.
+            generic_input_df = self.get_input()
+            if "content" in generic_input_df and not generic_input_df.empty:
+                input_str = "  - " + "\n  - ".join([str(c).replace("\\", r"\\") for c in generic_input_df["content"].dropna()])
+                prompt = re.sub(r"\{input\}", input_str, prompt) # No re.escape for replacement string itself
+            else:
+                prompt = re.sub(r"\{input\}", "", prompt) # Replace with empty if no content
+        return prompt
+
+    def _prepare_llm_messages(self, system_prompt_str: str, chat_model_max_length: int) -> tuple[str, list[dict[str, Any]]]:
+        """
+        Prepares the system prompt and message list for the LLM call,
+        including history and ensuring it fits within token limits.
+        """
+        history_messages = self._canvas.get_history(self._param.message_history_window_size)
+
+        # Ensure history doesn't end with an assistant message if we're retrying/continuing
+        if history_messages and history_messages[-1]['role'] == 'assistant':
+            history_messages.pop()
+
+        # Assemble messages for token fitting: system prompt + historical messages
+        messages_to_fit = [{"role": "system", "content": system_prompt_str}] + history_messages
+
+        # Ensure there's a user message at the end if the history is now empty or ends with system
+        if not messages_to_fit or messages_to_fit[-1]["role"] != "user":
+            # If history_messages was empty and only system prompt is there, add a default user turn
+            if len(messages_to_fit) == 1 and messages_to_fit[0]["role"] == "system":
+                 messages_to_fit.append({"role": "user", "content": "Output: "}) # Default user turn
+            # If messages_to_fit became empty (e.g. only assistant message popped), add default user turn
+            elif not messages_to_fit:
+                 messages_to_fit = [{"role": "user", "content": "Output: "}]
+
+        # Fit messages into token limit (message_fit_in is mocked)
+        # The mock LLMBundle has a max_length attribute.
+        _, fitted_messages = message_fit_in(messages_to_fit, int(chat_model_max_length * 0.97))
+
+        # Fallback if fitting results in empty messages (should be handled by message_fit_in ideally)
+        if not fitted_messages:
+            fitted_messages = [{"role": "user", "content": "Output: "}]
+
+        # Separate system prompt from chat history for the LLM
+        final_system_prompt = ""
+        final_chat_history = []
+        if fitted_messages[0]["role"] == "system":
+            final_system_prompt = fitted_messages[0]["content"]
+            final_chat_history = fitted_messages[1:]
+        else:
+            final_chat_history = fitted_messages
+
+        # Ensure chat history for LLM is not empty (add default user turn if necessary)
+        if not final_chat_history:
+            final_chat_history.append({"role":"user", "content":"Output:"})
+
+        return final_system_prompt, final_chat_history
+
+    def set_cite(self, retrieval_res_df: pd.DataFrame, answer: str):
+        """
+        Processes retrieval results to insert citations into the answer and format references.
+        :param retrieval_res_df: DataFrame containing retrieval results, expects a 'chunks' column with JSON strings.
+        :param answer: The raw answer string from the LLM.
+        :return: A dictionary with 'content' (answer with citations) and 'reference' (structured chunk data).
+        """
+        if not isinstance(retrieval_res_df, pd.DataFrame) or \
+           "chunks" not in retrieval_res_df.columns or \
+           retrieval_res_df.empty or \
+           not retrieval_res_df["chunks"].iloc[0]:
+            logging.warning("No valid chunks found in retrieval_res_df for citation.")
             res = {"content": answer, "reference": {"chunks": [], "doc_aggs": []}}
-            return structure_answer(None, res, "", "") # structure_answer is mocked
+            return structure_answer(None, res, "", "")
 
         try:
             # Assuming chunks are stored as a JSON string in the first row of the 'chunks' column
@@ -206,222 +343,133 @@ class Generate(ComponentBase):
         return res
 
     def _run(self, history, **kwargs):
-        chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT, self._param.llm_id) # LLMBundle is mocked
+        """
+        Main execution logic for the Generate component.
+        The `history` and `**kwargs` from the original signature are kept for compatibility
+        with ComponentBase.run, but specific prompt inputs are now fetched by _get_prompt_inputs.
+        """
+        chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT, self._param.llm_id)
 
-        # if len(self._param.llm_enabled_tools) > 0: # Removed plugin logic
-            # tools = GlobalPluginManager.get_llm_tools_by_names(self._param.llm_enabled_tools)
-            # if tools:
-            #     chat_mdl.bind_tools(
-            #         LLMToolPluginCallSession(),
-            #         [llm_tool_metadata_to_openai_tool(t.get_metadata()) for t in tools]
-            #     )
-            # else:
-            #     logging.warning(f"LLM tools {self._param.llm_enabled_tools} configured but not found by mock GlobalPluginManager.")
-        if self._param.llm_enabled_tools:
+        if self._param.llm_enabled_tools: # Logic for handling removed plugin system
             logging.warning("LLM tools are configured but plugin system has been removed. Tools will not be used.")
 
-        prompt = self._param.prompt
+        # Fetch and prepare prompt inputs
+        # Initialize prompt_template_vars with current_kwargs to capture any direct kwargs passed to run
+        prompt_template_vars = kwargs.copy()
+        _, retrieval_dfs = self._get_prompt_inputs(prompt_template_vars)
 
-        retrieval_res = []
-        self._param.inputs = []
-        for para in self.get_input_elements()[1:]:
-            if para["key"].lower().find("begin@") == 0:
-                cpn_id, key = para["key"].split("@")
-                for p in self._canvas.get_component(cpn_id)["obj"]._param.query:
-                    if p["key"] == key:
-                        kwargs[para["key"]] = p.get("value", "")
-                        self._param.inputs.append(
-                            {"component_id": para["key"], "content": kwargs[para["key"]]})
-                        break
-                else:
-                    assert False, f"Can't find parameter '{key}' for {cpn_id}"
-                continue
+        retrieval_res_df = pd.DataFrame([])
+        if retrieval_dfs: # Consolidate if multiple retrieval sources
+            retrieval_res_df = pd.concat(retrieval_dfs, ignore_index=True)
 
-            component_id = para["key"]
-            cpn = self._canvas.get_component(component_id)["obj"]
-            if cpn.component_name.lower() == "answer":
-                hist = self._canvas.get_history(1)
-                if hist:
-                    hist = hist[0]["content"]
-                else:
-                    hist = ""
-                kwargs[para["key"]] = hist
-                continue
-            _, out = cpn.output(allow_partial=False)
-            if "content" not in out.columns:
-                kwargs[para["key"]] = ""
-            else:
-                if cpn.component_name.lower() == "retrieval":
-                    retrieval_res.append(out)
-                kwargs[para["key"]] = "  - " + "\n - ".join([o if isinstance(o, str) else str(o) for o in out["content"]])
-            self._param.inputs.append({"component_id": para["key"], "content": kwargs[para["key"]]})
+        final_prompt_str = self._substitute_prompt_variables(self._param.prompt, prompt_template_vars)
 
-        if retrieval_res:
-            retrieval_res = pd.concat(retrieval_res, ignore_index=True)
-        else:
-            retrieval_res = pd.DataFrame([])
-
-        for n, v in kwargs.items():
-            prompt = re.sub(r"\{%s\}" % re.escape(n), str(v).replace("\\", " "), prompt)
-
-        if not self._param.inputs and prompt.find("{input}") >= 0:
-            retrieval_res = self.get_input()
-            input = ("  - " + "\n  - ".join(
-                [c for c in retrieval_res["content"] if isinstance(c, str)])) if "content" in retrieval_res else ""
-            prompt = re.sub(r"\{input\}", re.escape(input), prompt)
-
+        # Determine if streaming output is required
         downstreams = self._canvas.get_component(self._id)["downstream"]
-        if kwargs.get("stream") and len(downstreams) == 1 and self._canvas.get_component(downstreams[0])[
-            "obj"].component_name.lower() == "answer":
-            return partial(self.stream_output, chat_mdl, prompt, retrieval_res)
+        is_streaming_to_answer = kwargs.get("stream", False) and \
+                                 len(downstreams) == 1 and \
+                                 self._canvas.get_component(downstreams[0])["obj"].component_name.lower() == "answer"
 
-        # Check retrieval_res for content before deciding it's an "empty_response" case
-        # The "empty_response" column itself might not be the primary indicator if content is also empty.
-        # If retrieval_res is empty or its "content" column is empty/None.
-        is_retrieval_empty = retrieval_res.empty or \
-                             ("content" not in retrieval_res.columns) or \
-                             retrieval_res["content"].isnull().all() or \
-                             (not retrieval_res["content"].astype(str).str.strip().any())
+        if is_streaming_to_answer:
+            return partial(self.stream_output, chat_mdl, final_prompt_str, retrieval_res_df)
 
-        if is_retrieval_empty and "empty_response" in retrieval_res.columns and retrieval_res["empty_response"].iloc[0]:
-            # This case handles when Retrieval component itself produces a specific "empty_response"
-            empty_res_content = str(retrieval_res["empty_response"].iloc[0])
-            res = {"content": empty_res_content, "reference": []}
-            logging.info("Using empty_response from retrieval result.")
+        # Handle case where retrieval found nothing and direct empty response is appropriate
+        is_retrieval_empty = retrieval_res_df.empty or \
+                             ("content" not in retrieval_res_df.columns) or \
+                             retrieval_res_df["content"].isnull().all() or \
+                             (not retrieval_res_df["content"].astype(str).str.strip().any())
+
+        retrieval_has_specific_empty_response = not retrieval_res_df.empty and \
+                                               "empty_response" in retrieval_res_df.columns and \
+                                               retrieval_res_df["empty_response"].iloc[0]
+        if is_retrieval_empty:
+            empty_message_content = "Nothing found in knowledgebase (mock response)."
+            if retrieval_has_specific_empty_response:
+                 empty_message_content = str(retrieval_res_df["empty_response"].iloc[0])
+
+            logging.info(f"Retrieval result is empty. Short-circuiting with: '{empty_message_content}'")
+            res = {"content": empty_message_content, "reference": []}
             return pd.DataFrame([res])
-        elif is_retrieval_empty: # General case if retrieval found nothing and no specific empty_response was set by it
-            res = {"content": "Nothing found in knowledgebase (mock response).", "reference": []}
-            logging.info("Retrieval result is empty, returning default empty message.")
-            return pd.DataFrame([res])
 
+        # Prepare messages for LLM
+        system_prompt_for_llm, chat_history_for_llm = self._prepare_llm_messages(final_prompt_str, chat_mdl.max_length)
 
-        history_messages = self._canvas.get_history(self._param.message_history_window_size)
-
-        # Construct messages for the LLM
-        llm_messages = [{"role": "system", "content": prompt}] + history_messages
-
-        # Ensure the last message is 'user' if history is not empty, or add a dummy user message.
-        # The mock LLM might not care, but good practice.
-        if not llm_messages or llm_messages[-1]["role"] != "user":
-             # Check if the last message from history_messages was assistant, if so, append user output
-            if history_messages and history_messages[-1]["role"] == "assistant":
-                llm_messages.append({"role": "user", "content": "Output: "}) # Default user turn
-            elif not history_messages and llm_messages[0]["role"] == "system": # Only system prompt
-                llm_messages.append({"role": "user", "content": "Output: "})
-
-
-        # message_fit_in is mocked. chat_mdl.max_length comes from mocked LLMBundle.
-        _, fitted_messages = message_fit_in(llm_messages, int(chat_mdl.max_length * 0.97))
-
-        if not fitted_messages or fitted_messages[0]["role"] != "system": # Ensure system prompt is first if present
-            # This case should ideally be handled by message_fit_in logic.
-            # If fitted_messages is empty or system prompt is missing, we might need to adjust.
-            # For now, assume message_fit_in mock handles it reasonably.
-            # If only user message is left, that's also fine.
-            if not fitted_messages: # if message_fit_in returns empty, add a default
-                 fitted_messages=[{"role": "user", "content": "Output: "}]
-
-
-        system_prompt_for_llm = ""
-        chat_history_for_llm = []
-        if fitted_messages[0]["role"] == "system":
-            system_prompt_for_llm = fitted_messages[0]["content"]
-            chat_history_for_llm = fitted_messages[1:]
-        else:
-            chat_history_for_llm = fitted_messages
-
-        if not chat_history_for_llm: # Ensure chat history is not empty
-            chat_history_for_llm.append({"role":"user", "content":"Output:"})
-
-
-        # chat_mdl.chat is mocked
+        # LLM call
         ans = chat_mdl.chat(system_prompt_for_llm, chat_history_for_llm, self._param.gen_conf())
-        ans = re.sub(r"^.*</think>", "", ans, flags=re.DOTALL) # This post-processing can remain
+        ans = re.sub(r"^.*</think>", "", ans, flags=re.DOTALL)
 
         self._canvas.set_component_infor(self._id, {"prompt": system_prompt_for_llm, "messages": chat_history_for_llm, "conf": self._param.gen_conf()})
 
-        if self._param.cite and "chunks" in retrieval_res.columns and not retrieval_res["chunks"].isnull().all():
-            # Make sure retrieval_res is not empty and has actual chunks before citing
-            if not retrieval_res.empty and retrieval_res["chunks"].iloc[0] and json.loads(retrieval_res["chunks"].iloc[0]):
-                res = self.set_cite(retrieval_res, ans)
-                return pd.DataFrame([res])
-            else: # No valid chunks to cite
-                logging.info("Citation skipped as no valid chunks found in retrieval_res.")
-                return Generate.be_output(ans) # ans already has the LLM response
+        # Handle citation
+        if self._param.cite and "chunks" in retrieval_res_df.columns and not retrieval_res_df["chunks"].isnull().all():
+            if not retrieval_res_df.empty and retrieval_res_df["chunks"].iloc[0]:
+                try:
+                    json_chunks = json.loads(retrieval_res_df["chunks"].iloc[0])
+                    if isinstance(json_chunks, list) and json_chunks:
+                        res = self.set_cite(retrieval_res_df, ans)
+                        return pd.DataFrame([res])
+                except (json.JSONDecodeError, TypeError) as e:
+                    logging.warning(f"Citation skipped: Chunks data in retrieval_res_df is not valid JSON list or is empty. Error: {e}")
+            else:
+                logging.info("Citation skipped as no valid chunks data found in retrieval_res_df.")
 
-        return Generate.be_output(ans) # ans is the direct LLM response
+        # Default case if no citation or citation path wasn't taken
+        return Generate.be_output(ans)
 
-    def stream_output(self, chat_mdl, prompt, retrieval_res):
-        res = None # Final response to be set by set_output
+    def stream_output(self, chat_mdl: LLMBundle, final_prompt_str: str, retrieval_res_df: pd.DataFrame):
+        """
+        Handles streaming output from the LLM, including potential citation processing.
+        """
+        final_streamed_response_dict = {"content": "", "reference": []}
 
-        is_retrieval_empty = retrieval_res.empty or \
-                             ("content" not in retrieval_res.columns) or \
-                             retrieval_res["content"].isnull().all() or \
-                             (not retrieval_res["content"].astype(str).str.strip().any())
+        is_retrieval_empty = retrieval_res_df.empty or \
+                             ("content" not in retrieval_res_df.columns) or \
+                             retrieval_res_df["content"].isnull().all() or \
+                             (not retrieval_res_df["content"].astype(str).str.strip().any())
 
-        if is_retrieval_empty and "empty_response" in retrieval_res.columns and retrieval_res["empty_response"].iloc[0]:
-            empty_res_content = str(retrieval_res["empty_response"].iloc[0])
-            current_res_dict = {"content": empty_res_content, "reference": []}
-            logging.info("Stream: Using empty_response from retrieval result.")
-            yield current_res_dict
-            self.set_output(pd.DataFrame([current_res_dict])) # Set final output for the component
+        retrieval_has_specific_empty_response = not retrieval_res_df.empty and \
+                                               "empty_response" in retrieval_res_df.columns and \
+                                               retrieval_res_df["empty_response"].iloc[0]
+
+        if is_retrieval_empty:
+            empty_message_content = "Nothing found in knowledgebase (mock stream response)."
+            if retrieval_has_specific_empty_response:
+                empty_message_content = str(retrieval_res_df["empty_response"].iloc[0])
+
+            logging.info(f"Stream: Retrieval result is empty, yielding: '{empty_message_content}'")
+            final_streamed_response_dict = {"content": empty_message_content, "reference": []}
+            yield final_streamed_response_dict
+            self.set_output(pd.DataFrame([final_streamed_response_dict]))
             return
-        elif is_retrieval_empty:
-            current_res_dict = {"content": "Nothing found in knowledgebase (mock stream response).", "reference": []}
-            logging.info("Stream: Retrieval result is empty, yielding default empty message.")
-            yield current_res_dict
-            self.set_output(pd.DataFrame([current_res_dict]))
-            return
 
-        history_messages = self._canvas.get_history(self._param.message_history_window_size)
-        # Remove last assistant message from history if it exists, to prevent double assistant responses
-        if history_messages and history_messages[-1]['role'] == 'assistant':
-             history_messages.pop() # Critical fix: was msg[0] before, should be history_messages[-1]
-
-        llm_messages = [{"role": "system", "content": prompt}] + history_messages
-        if not llm_messages or llm_messages[-1]["role"] != "user":
-            if history_messages and history_messages[-1]["role"] == "assistant": # This condition may no longer be met due to pop above
-                 llm_messages.append({"role": "user", "content": "Output: "})
-            elif not history_messages and llm_messages[0]["role"] == "system":
-                 llm_messages.append({"role": "user", "content": "Output: "})
-
-
-        _, fitted_messages = message_fit_in(llm_messages, int(chat_mdl.max_length * 0.97))
-        if not fitted_messages: fitted_messages=[{"role": "user", "content": "Output: "}]
-
-        system_prompt_for_llm = ""
-        chat_history_for_llm = []
-        if fitted_messages[0]["role"] == "system":
-            system_prompt_for_llm = fitted_messages[0]["content"]
-            chat_history_for_llm = fitted_messages[1:]
-        else:
-            chat_history_for_llm = fitted_messages
-
-        if not chat_history_for_llm: chat_history_for_llm.append({"role":"user", "content":"Output:"})
+        system_prompt_for_llm, chat_history_for_llm = self._prepare_llm_messages(final_prompt_str, chat_mdl.max_length)
 
         streamed_answer_content = ""
-        # chat_mdl.chat_streamly is mocked
         for ans_chunk in chat_mdl.chat_streamly(system_prompt_for_llm, chat_history_for_llm, self._param.gen_conf()):
-            current_res_dict = {"content": ans_chunk, "reference": []} # Mock reference for stream
-            streamed_answer_content = ans_chunk # The mock yields the full answer at once. If it were real stream, this would build up.
-            yield current_res_dict
+            current_yield_dict = {"content": ans_chunk, "reference": []}
+            streamed_answer_content = ans_chunk
+            yield current_yield_dict
+            final_streamed_response_dict = current_yield_dict
 
-        # After stream finishes, set the component's information
         self._canvas.set_component_infor(self._id, {"prompt": system_prompt_for_llm, "messages": chat_history_for_llm, "conf": self._param.gen_conf()})
 
-        # Final processing for citation, using the fully streamed answer
-        final_res_dict = {"content": streamed_answer_content, "reference": []} # Default if no citation
-        if self._param.cite and "chunks" in retrieval_res.columns and not retrieval_res["chunks"].isnull().all():
-            if not retrieval_res.empty and retrieval_res["chunks"].iloc[0] and json.loads(retrieval_res["chunks"].iloc[0]):
-                # Use the fully accumulated answer for citation
-                final_res_dict = self.set_cite(retrieval_res, streamed_answer_content)
-                yield final_res_dict # Yield the cited version as the last item
+        if self._param.cite and "chunks" in retrieval_res_df.columns and not retrieval_res_df["chunks"].isnull().all():
+            if not retrieval_res_df.empty and retrieval_res_df["chunks"].iloc[0]:
+                try:
+                    json_chunks = json.loads(retrieval_res_df["chunks"].iloc[0])
+                    if isinstance(json_chunks, list) and json_chunks:
+                        cited_response_dict = self.set_cite(retrieval_res_df, streamed_answer_content)
+                        yield cited_response_dict
+                        final_streamed_response_dict = cited_response_dict
+                    else:
+                        logging.info("Stream: Citation skipped as chunks data is empty or not a list.")
+                except (json.JSONDecodeError, TypeError) as e:
+                    logging.warning(f"Stream: Citation skipped due to error decoding chunks. Error: {e}")
             else:
-                logging.info("Stream: Citation skipped as no valid chunks found.")
+                logging.info("Stream: Citation skipped as no valid chunk data found in retrieval_res_df.")
 
-        self.set_output(pd.DataFrame([final_res_dict])) # Set the final output of the component
+        self.set_output(pd.DataFrame([final_streamed_response_dict]))
 
-    # This is the start of the properly indented debug method
     def debug(self, **kwargs):
         # LLMBundle is mocked
         logging.info(f"Generate.debug called with llm_id: {self._param.llm_id}, prompt: {self._param.prompt[:50]}...")

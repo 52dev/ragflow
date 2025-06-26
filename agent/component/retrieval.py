@@ -35,18 +35,30 @@ from rag.utils.tavily_conn import Tavily
 
 class RetrievalParam(ComponentParamBase):
     """
-    Define the Retrieval component parameters.
+    Parameters for the Retrieval component.
+
+    Attributes:
+        similarity_threshold (float): Threshold for similarity scores (inactive for current mocks).
+        keywords_similarity_weight (float): Weight for keyword similarity (inactive for current mocks).
+        top_n (int): Number of top results to fetch. Used by Tavily.
+        top_k (int): Parameter for retrieval (inactive for current mocks, was for DB retrieval).
+        kb_ids (list[str]): List of Knowledge Base IDs (inactive due to DB removal).
+        kb_vars (list[str]): List of variables holding Knowledge Base IDs (inactive due to DB removal).
+        rerank_id (str): ID of the reranking model to use (functionality currently mocked/inactive).
+        empty_response (str): Custom message to return if no results are found.
+        tavily_api_key (str): API key for Tavily web search.
+        use_kg (bool): Flag to enable mocked Knowledge Graph retrieval.
     """
 
     def __init__(self):
         super().__init__()
-        self.similarity_threshold = 0.2
-        self.keywords_similarity_weight = 0.5
-        self.top_n = 8
-        self.top_k = 1024
-        self.kb_ids = []
-        self.kb_vars = []
-        self.rerank_id = ""
+        self.similarity_threshold = 0.2  # Currently inactive with mock/Tavily-only setup
+        self.keywords_similarity_weight = 0.5  # Currently inactive
+        self.top_n = 8  # Used by Tavily
+        self.top_k = 1024  # Originally for DB-based retrieval, now inactive
+        self.kb_ids = []  # Inactive due to DB removal
+        self.kb_vars = []  # Inactive due to DB removal
+        self.rerank_id = ""  # Reranking functionality is currently mocked/inactive
         self.empty_response = ""
         self.tavily_api_key = ""
         self.use_kg = False
@@ -58,9 +70,28 @@ class RetrievalParam(ComponentParamBase):
 
 
 class Retrieval(ComponentBase, ABC):
+    """
+    The Retrieval component fetches relevant information based on a query.
+    After refactoring, it primarily uses:
+    1. Tavily API for web search (if `tavily_api_key` is provided).
+    2. A mocked Knowledge Graph (KG) interface (if `use_kg` is true).
+    Database-backed knowledge base retrieval has been removed.
+    """
     component_name = "Retrieval"
 
     def _run(self, history, **kwargs):
+        """
+        Executes the retrieval process.
+
+        Steps:
+        1. Gets and preprocesses the input query.
+        2. Logs a warning if DB-related parameters (kb_ids, kb_vars) are used, as they are now inactive.
+        3. Initializes an empty result structure `kbinfos`.
+        4. If `use_kg` is true, adds a mock KG chunk to `kbinfos`.
+        5. If `tavily_api_key` is provided, calls the (mocked) Tavily service and appends results to `kbinfos`.
+        6. If no chunks are found from any source, returns an empty response or the user-defined `empty_response`.
+        7. Otherwise, formats the retrieved chunks using `kb_prompt` and returns them in a DataFrame.
+        """
         query = self.get_input()
         query = str(query["content"][0]) if "content" in query and not query.empty else ""
         query = re.split(r"(USER:|ASSISTANT:)", query)[-1]
@@ -155,20 +186,16 @@ class Retrieval(ComponentBase, ABC):
 
         df = pd.DataFrame({"content": prompt_content, "chunks": json.dumps(serializable_chunks)})
         logging.debug(f"Retrieval component for query '{query}' output: {df.to_string()}")
-        # Stray lines removed here
+        # Stray lines removed here & redundant block below is removed.
 
-        if not kbinfos["chunks"]:
-            # This case is handled above now by the "No chunks found from any source" log and return.
-            # This specific block might be redundant unless there's a path where kbinfos["chunks"] is empty
-            # but the earlier "No chunks found" wasn't hit (e.g. if only doc_aggs were populated).
-            # For safety, keeping a fall-through.
-            logging.info("Retrieval component: Final check, no chunks to process.")
-            df = Retrieval.be_output(self._param.empty_response if self._param.empty_response and self._param.empty_response.strip() else "")
-            return df
+        # The following block was identified as redundant because the case of no chunks
+        # is already handled by the "No chunks found from any source" check further up.
+        # if not kbinfos["chunks"]:
+        #     logging.info("Retrieval component: Final check, no chunks to process.")
+        #     df = Retrieval.be_output(self._param.empty_response if self._param.empty_response and self._param.empty_response.strip() else "")
+        #     return df
 
-        # Ensure kb_prompt gets what it expects. Our mock kb_prompt is simple.
-        prompt_content = kb_prompt({"chunks": serializable_chunks, "doc_aggs": kbinfos.get("doc_aggs", [])}, 200000)
-
-        df = pd.DataFrame({"content": prompt_content, "chunks": json.dumps(serializable_chunks)})
-        logging.debug(f"Retrieval component for query '{query}' output: {df.to_string()}")
+        # The kb_prompt and DataFrame creation are already done before this point if there are chunks.
+        # If there were no chunks, it would have returned earlier.
+        # So, if execution reaches here, df is already populated correctly.
         return df.dropna()
