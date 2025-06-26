@@ -1,6 +1,8 @@
 # agent/api_server.py
 import uuid
 from typing import Dict, Any, List, Optional
+import logging # Added
+import pandas as pd # Added
 
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel, Field # BaseModel will be used for request/response models
@@ -66,6 +68,28 @@ class ComponentListItem(BaseModel):
     """Response model for listing available components."""
     name: str
     # Potentially add: params_schema: Optional[Dict[str, Any]] = None
+
+
+class WorkflowRunRequest(BaseModel):
+    """Request model for running a workflow."""
+    initial_input: str = Field(..., description="The initial user input or question for the workflow.")
+    stream: bool = Field(default=False, description="Whether to stream the output. Note: Streaming is not fully implemented in this version for the run endpoint.")
+    # Future: Could add a dictionary for other ad-hoc parameters to pass to canvas.run(**kwargs)
+
+class WorkflowOutputItem(BaseModel):
+    """Represents a single item yielded by the workflow's run method (non-streaming)."""
+    # The canvas.run() yields dicts, often {"content": "...", "running_status": True/False}
+    # or just {"content": "...", "reference": ...}
+    # Using Dict[str, Any] provides flexibility for what each yielded step contains.
+    step_output: Dict[str, Any]
+
+class WorkflowRunResponse(BaseModel):
+    """Response model for a non-streaming workflow run."""
+    # Returns a list of all items yielded by canvas.run() during its execution.
+    # The client can then process this list (e.g., take the last item's 'content' if it's from an Answer node).
+    run_outputs: List[WorkflowOutputItem] = Field(description="A list of all output dictionaries yielded by the workflow execution.")
+    workflow_id: str
+    final_message_content: Optional[str] = Field(None, description="The 'content' from the very last yielded output, if available and applicable (often from an Answer node).")
 
 # --- End Pydantic Models ---
 
@@ -168,6 +192,89 @@ async def list_workflows_endpoint():
 
 # Import from workflow_builder for /components endpoint
 from .workflow_builder import list_available_components
+from agent.canvas import Canvas # Added for the run endpoint
+import json # For parsing DSL string if needed, though WORKFLOWS_DB stores dicts
+
+@app.post("/workflows/{workflow_id}/run", response_model=WorkflowRunResponse)
+async def run_workflow_endpoint(workflow_id: str, run_request: WorkflowRunRequest = Body(...)):
+    """
+    Executes a specified workflow with the given initial input.
+    Currently supports non-streaming responses.
+    """
+    if workflow_id not in WORKFLOWS_DB:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    workflow_dsl_dict = WORKFLOWS_DB[workflow_id]
+
+    # The Canvas expects a JSON string DSL, but we store it as a dict.
+    # So, we need to dump it to string first.
+    try:
+        dsl_string = json.dumps(workflow_dsl_dict)
+        canvas = Canvas(dsl=dsl_string) # Canvas expects a string DSL
+    except Exception as e:
+        # This could happen if the stored DSL dict is somehow invalid for Canvas init
+        # or json.dumps fails, though unlikely if it came from WorkflowDSL model.
+        logging.error(f"Error initializing Canvas for workflow {workflow_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to initialize workflow canvas: {str(e)}")
+
+    if run_request.initial_input:
+        canvas.add_user_input(run_request.initial_input)
+
+    run_outputs_raw = []
+    final_content: Optional[str] = None
+
+    try:
+        # Non-streaming execution
+        if run_request.stream:
+            # For now, we'll treat stream=True as non-streaming and collect all outputs.
+            # True streaming response would require StreamingResponse and different handling.
+            logging.warning("Streaming requested but not fully implemented for this endpoint yet. Collecting all outputs.")
+
+        for item in canvas.run(stream=False):
+            final_yielded_item = item # Keep track of the very last item yielded
+            if isinstance(item, dict):
+                run_outputs_raw.append(WorkflowOutputItem(step_output=item))
+                # Potentially update final_content if it's a non-status dict with content
+                if "content" in item and not item.get("running_status"):
+                    # This might be overwritten if a DataFrame is the actual last output
+                    final_content = str(item["content"])
+            elif isinstance(item, pd.DataFrame):
+                # Convert DataFrame to a list of dicts for consistent output structure
+                # This is likely the actual final output from an Answer node in non-streaming mode
+                df_records = item.to_dict(orient='records')
+                run_outputs_raw.append(WorkflowOutputItem(step_output={"dataframe_output": df_records}))
+                if df_records and "content" in df_records[0]:
+                    final_content = str(df_records[0]["content"]) # Assume first row of DF has the relevant content
+            else:
+                logging.warning(f"Workflow {workflow_id} yielded unexpected type: {type(item)}, value: {item}")
+                run_outputs_raw.append(WorkflowOutputItem(step_output={"unknown_output": str(item)}))
+
+    except Exception as e:
+        logging.error(f"Error during workflow execution for {workflow_id}: {e}", exc_info=True)
+        # Capture the error in the output as well
+        error_output = {"error": "Workflow execution failed at canvas level.", "detail": str(e)}
+        run_outputs_raw.append(WorkflowOutputItem(step_output=error_output))
+        # final_content might remain from before the error, or be None.
+        # Consider if we should raise HTTPException here or let the client see the error in run_outputs.
+        # For now, returning outputs including the error.
+        # raise HTTPException(status_code=500, detail=f"Workflow execution error: {str(e)}")
+
+    # Refined final_content extraction from the very last yielded item
+    if final_yielded_item is not None:
+        if isinstance(final_yielded_item, pd.DataFrame):
+            if not final_yielded_item.empty and "content" in final_yielded_item.columns:
+                final_content = str(final_yielded_item["content"].iloc[0])
+        elif isinstance(final_yielded_item, dict):
+            if "content" in final_yielded_item and not final_yielded_item.get("running_status"):
+                final_content = str(final_yielded_item["content"])
+        # else final_content remains as it was (None or from a previous dict)
+
+    return WorkflowRunResponse(
+        workflow_id=workflow_id,
+        run_outputs=run_outputs_raw, # This is List[WorkflowOutputItem]
+        final_message_content=final_content
+    )
+
 
 @app.get("/components", response_model=List[ComponentListItem])
 async def get_available_components_endpoint():

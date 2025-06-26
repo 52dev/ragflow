@@ -472,6 +472,10 @@ The API documentation (Swagger UI) will be available at `http://localhost:8000/d
     *   **Response:** 204 No Content on success. Returns 404 if not found.
 *   **`GET /components`**: Lists all available component names that can be used in workflows.
     *   **Response:** JSON array of objects, each with `name` (string).
+*   **`POST /workflows/{workflow_id}/run`**: Executes a specified workflow.
+    *   **Path Parameter:** `workflow_id` (string, required).
+    *   **Request Body:** JSON object with `initial_input` (string, required, the first user message) and `stream` (boolean, optional, default: `false`. Note: True streaming output is not yet fully implemented; this endpoint currently collects all outputs regardless).
+    *   **Response:** JSON object (`WorkflowRunResponse`) containing `workflow_id`, a list of `run_outputs` (each `step_output` being a dictionary yielded by the workflow), and `final_message_content` (the 'content' of the last relevant output). Returns 404 if `workflow_id` not found.
 
 ### `curl` 用法示例 (Example `curl` Usage):
 
@@ -510,5 +514,14 @@ curl -X GET "http://localhost:8000/workflows/{workflow_id}"
 **4. 列出可用组件 (List available components):**
 ```bash
 curl -X GET "http://localhost:8000/components"
+```
+
+**5. 运行工作流 (Run a workflow) (将 `{workflow_id}` 替换为实际ID):**
+```bash
+curl -X POST "http://localhost:8000/workflows/{workflow_id}/run" \
+-H "Content-Type: application/json" \
+-d '{
+  "initial_input": "Tell me about large language models."
+}'
 ```
 *(Machine translation for: Further details on specific component parameters and advanced usage can be found by examining the component's source code in `agent/component/` and its corresponding parameter class (e.g., `GenerateParam` for `Generate`).)*
