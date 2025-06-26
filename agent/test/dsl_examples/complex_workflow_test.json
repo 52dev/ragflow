@@ -1,0 +1,144 @@
+{
+    "components": {
+        "begin": {
+            "obj": {
+                "component_name": "Begin",
+                "params": {
+                    "prologue": "Hello! This is a complex workflow test. What's your query?"
+                }
+            },
+            "downstream": ["answer_user_input"],
+            "upstream": [],
+            "parent_id": ""
+        },
+        "answer_user_input": {
+            "obj": {
+                "component_name": "Answer",
+                "params": {}
+            },
+            "downstream": ["retrieval_0", "keyword_0"],
+            "upstream": ["begin"],
+            "parent_id": ""
+        },
+        "retrieval_0": {
+            "obj": {
+                "component_name": "Retrieval",
+                "params": {
+                    "tavily_api_key": "mock_tavily_key",
+                    "use_kg": true,
+                    "empty_response": "No web/KG results found for your query."
+                }
+            },
+            "downstream": ["relevant_0"],
+            "upstream": ["answer_user_input"],
+            "parent_id": ""
+        },
+        "keyword_0": {
+            "obj": {
+                "component_name": "KeywordExtract",
+                "params": {
+                    "llm_id": "mock_llm_for_keyword",
+                    "top_n": 1
+                }
+            },
+            "downstream": ["wikipedia_0"],
+            "upstream": ["answer_user_input"],
+            "parent_id": ""
+        },
+        "wikipedia_0": {
+            "obj": {
+                "component_name": "Wikipedia",
+                "params": {
+                    "lang": "en",
+                    "doc_max_len": 200
+                }
+            },
+            "downstream": ["relevant_0"],
+            "upstream": ["keyword_0"],
+            "parent_id": ""
+        },
+        "relevant_0": {
+            "obj": {
+                "component_name": "Relevant",
+                "params": {
+                    "llm_id": "mock_llm_for_relevance",
+                    "query": [
+                        {"component_id": "retrieval_0", "name": "Web/KG Results"}
+                    ],
+                    "yes": "go_to_A",
+                    "no": "go_to_B"
+                }
+            },
+            "downstream": ["switch_0"],
+            "upstream": ["retrieval_0", "wikipedia_0"],
+            "parent_id": ""
+        },
+        "switch_0": {
+            "obj": {
+                "component_name": "Switch",
+                "params": {
+                    "conditions": [
+                        {
+                            "logical_operator": "and",
+                            "items": [
+                                {"cpn_id": "relevant_0", "operator": "=", "value": "go_to_A"}
+                            ],
+                            "to": "generate_A_wiki"
+                        },
+                        {
+                            "logical_operator": "and",
+                            "items": [
+                                {"cpn_id": "relevant_0", "operator": "=", "value": "go_to_B"}
+                            ],
+                            "to": "generate_B_retrieval"
+                        }
+                    ],
+                    "end_cpn_id": "answer_bot_output"
+                }
+            },
+            "downstream": ["generate_A_wiki", "generate_B_retrieval"],
+            "upstream": ["relevant_0"],
+            "parent_id": ""
+        },
+        "generate_A_wiki": {
+            "obj": {
+                "component_name": "Generate",
+                "params": {
+                    "llm_id": "mock_llm_for_generate_A",
+                    "prompt": "Based on relevant Wikipedia content: {wikipedia_0}\nSummarize it regarding the query from user.",
+                    "cite": false
+                }
+            },
+            "downstream": ["answer_bot_output"],
+            "upstream": ["switch_0"],
+            "parent_id": ""
+        },
+        "generate_B_retrieval": {
+            "obj": {
+                "component_name": "Generate",
+                "params": {
+                    "llm_id": "mock_llm_for_generate_B",
+                    "prompt": "Wikipedia content was not relevant. Based on other findings: {retrieval_0}\nFormulate a response to the user query.",
+                    "cite": true
+                }
+            },
+            "downstream": ["answer_bot_output"],
+            "upstream": ["switch_0"],
+            "parent_id": ""
+        },
+        "answer_bot_output": {
+            "obj": {
+                "component_name": "Answer",
+                "params": {}
+            },
+            "downstream": [],
+            "upstream": ["generate_A_wiki", "generate_B_retrieval"],
+            "parent_id": ""
+        }
+    },
+    "history": [],
+    "messages": [],
+    "reference": [],
+    "path": [],
+    "answer": []
+}
