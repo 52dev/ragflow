@@ -40,7 +40,7 @@ if __name__ == '__main__':
     try:
         with open(args.dsl, "r") as f:
             dsl_content = f.read()
-        canvas = Canvas(dsl_content, args.tenant_id)
+        canvas = Canvas(dsl_content) # tenant_id removed
 
         # Add initial user input if provided (some flows might not need it immediately)
         if args.question:

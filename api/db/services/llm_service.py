@@ -1,10 +1,12 @@
 # Dummy LLMService
 import pandas as pd
+import logging # Added for logging
 
 class LLMBundle:
-    def __init__(self, tenant_id, llm_type, llm_name, **kwargs):
-        print(f"Mock LLMBundle initialized with tenant_id={tenant_id}, llm_type={llm_type}, llm_name={llm_name}")
-        self.tenant_id = tenant_id
+    def __init__(self, llm_type, llm_name, **kwargs): # tenant_id removed
+        # print(f"Mock LLMBundle initialized with tenant_id={tenant_id}, llm_type={llm_type}, llm_name={llm_name}")
+        logging.info(f"Mock LLMBundle initialized with llm_type={llm_type}, llm_name='{llm_name}'")
+        # self.tenant_id = tenant_id # Removed
         self.llm_type = llm_type
         self.llm_name = llm_name
         self.max_length = 4096 # Default max length

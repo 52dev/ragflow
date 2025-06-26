@@ -28,29 +28,29 @@ from .keyword import KeywordExtract, KeywordExtractParam
 from .concentrator import Concentrator, ConcentratorParam
 from .baidu import Baidu, BaiduParam
 from .duckduckgo import DuckDuckGo, DuckDuckGoParam
-from .wikipedia import Wikipedia, WikipediaParam
-from .pubmed import PubMed, PubMedParam
-from .arxiv import ArXiv, ArXivParam
+# from .wikipedia import Wikipedia, WikipediaParam # Removed
+# from .pubmed import PubMed, PubMedParam # Removed
+# from .arxiv import ArXiv, ArXivParam # Removed
 from .google import Google, GoogleParam
 from .bing import Bing, BingParam
 from .googlescholar import GoogleScholar, GoogleScholarParam
-from .deepl import DeepL, DeepLParam
-from .github import GitHub, GitHubParam
-from .baidufanyi import BaiduFanyi, BaiduFanyiParam
-from .qweather import QWeather, QWeatherParam
-# from .exesql import ExeSQL, ExeSQLParam # Removed
-from .yahoofinance import YahooFinance, YahooFinanceParam
-from .wencai import WenCai, WenCaiParam
-from .jin10 import Jin10, Jin10Param
-from .tushare import TuShare, TuShareParam
-from .akshare import AkShare, AkShareParam
-from .crawler import Crawler, CrawlerParam
-from .invoke import Invoke, InvokeParam
+# from .deepl import DeepL, DeepLParam # Removed
+# from .github import GitHub, GitHubParam # Removed
+# from .baidufanyi import BaiduFanyi, BaiduFanyiParam # Removed
+# from .qweather import QWeather, QWeatherParam # Removed
+# from .exesql import ExeSQL, ExeSQLParam # Already Removed
+# from .yahoofinance import YahooFinance, YahooFinanceParam # Removed
+# from .wencai import WenCai, WenCaiParam # Removed
+# from .jin10 import Jin10, Jin10Param # Removed
+# from .tushare import TuShare, TuShareParam # Removed
+# from .akshare import AkShare, AkShareParam # Removed
+# from .crawler import Crawler, CrawlerParam # Removed
+# from .invoke import Invoke, InvokeParam # Removed
 from .template import Template, TemplateParam
-from .email import Email, EmailParam
+# from .email import Email, EmailParam # Removed
 from .iteration import Iteration, IterationParam
 from .iterationitem import IterationItem, IterationItemParam
-from .code import Code, CodeParam
+# from .code import Code, CodeParam # Removed
 
 
 def component_class(class_name):
@@ -86,51 +86,49 @@ __all__ = [
     "BaiduParam",
     "DuckDuckGo",
     "DuckDuckGoParam",
-    "Wikipedia",
-    "WikipediaParam",
-    "PubMed",
-    "PubMedParam",
-    "ArXiv",
-    "ArXivParam",
+    # "Wikipedia", # Removed
+    # "WikipediaParam", # Removed
+    # "PubMed", # Removed
+    # "PubMedParam", # Removed
+    # "ArXiv", # Removed
+    # "ArXivParam", # Removed
     "Google",
     "GoogleParam",
     "Bing",
     "BingParam",
     "GoogleScholar",
     "GoogleScholarParam",
-    "DeepL",
-    "DeepLParam",
-    "GitHub",
-    "GitHubParam",
-    "BaiduFanyi",
-    "BaiduFanyiParam",
-    "QWeather",
-    "QWeatherParam",
-    # "ExeSQL", # Removed
-    # "ExeSQLParam", # Removed
-    "YahooFinance",
-    "YahooFinanceParam",
-    "WenCai",
-    "WenCaiParam",
-    "Jin10",
-    "Jin10Param",
-    "TuShare",
-    "TuShareParam",
-    "AkShare",
-    "AkShareParam",
-    "Crawler",
-    "CrawlerParam",
-    "Invoke",
-    "InvokeParam",
+    # "DeepL", # Removed
+    # "DeepLParam", # Removed
+    # "GitHub", # Removed
+    # "GitHubParam", # Removed
+    # "BaiduFanyi", # Removed
+    # "BaiduFanyiParam", # Removed
+    # "QWeather", # Removed
+    # "QWeatherParam", # Removed
+    # "YahooFinance", # Removed
+    # "YahooFinanceParam", # Removed
+    # "WenCai", # Removed
+    # "WenCaiParam", # Removed
+    # "Jin10", # Removed
+    # "Jin10Param", # Removed
+    # "TuShare", # Removed
+    # "TuShareParam", # Removed
+    # "AkShare", # Removed
+    # "AkShareParam", # Removed
+    # "Crawler", # Removed
+    # "CrawlerParam", # Removed
+    # "Invoke", # Removed
+    # "InvokeParam", # Removed
     "Iteration",
     "IterationParam",
     "IterationItem",
     "IterationItemParam",
     "Template",
     "TemplateParam",
-    "Email",
-    "EmailParam",
-    "Code",
-    "CodeParam",
+    # "Email", # Removed
+    # "EmailParam", # Removed
+    # "Code", # Removed
+    # "CodeParam", # Removed
     "component_class"
 ]

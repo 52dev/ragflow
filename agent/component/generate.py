@@ -361,7 +361,7 @@ class Generate(ComponentBase):
             answer,
             mock_content_ltks,
             mock_vectors,
-            LLMBundle(self._canvas.get_tenant_id(), LLMType.EMBEDDING, self._canvas.get_embedding_model()), # LLMBundle is mocked
+            LLMBundle(LLMType.EMBEDDING, self._canvas.get_embedding_model()), # tenant_id removed
             tkweight=0.7,
             vtweight=0.3
         )
@@ -433,7 +433,7 @@ class Generate(ComponentBase):
         The `history` and `**kwargs` from the original signature are kept for compatibility
         with ComponentBase.run, but specific prompt inputs are now fetched by _get_prompt_inputs.
         """
-        chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT, self._param.llm_id)
+        chat_mdl = LLMBundle(LLMType.CHAT, self._param.llm_id) # tenant_id removed
 
         if self._param.llm_enabled_tools: # Logic for handling removed plugin system
             logging.warning("LLM tools are configured but plugin system has been removed. Tools will not be used.")
@@ -558,7 +558,7 @@ class Generate(ComponentBase):
     def debug(self, **kwargs):
         # LLMBundle is mocked
         logging.info(f"Generate.debug called with llm_id: {self._param.llm_id}, prompt: {self._param.prompt[:50]}...")
-        chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT, self._param.llm_id)
+        chat_mdl = LLMBundle(LLMType.CHAT, self._param.llm_id) # tenant_id removed
         prompt_template = self._param.prompt # Use the prompt template from params
 
         # Process debug inputs to fill in template

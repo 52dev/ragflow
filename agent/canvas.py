@@ -68,7 +68,7 @@ class Canvas:
     }
     """
 
-    def __init__(self, dsl: str, tenant_id=None):
+    def __init__(self, dsl: str): # tenant_id removed
         self.path = []
         self.history = []
         self.messages = []
@@ -94,7 +94,7 @@ class Canvas:
             "path": [],
             "answer": []
         }
-        self._tenant_id = tenant_id
+        # self._tenant_id = tenant_id # Removed
         self._embed_id = ""
         self.load()
 
@@ -306,8 +306,8 @@ class Canvas:
     def get_component(self, cpn_id):
         return self.components[cpn_id]
 
-    def get_tenant_id(self):
-        return self._tenant_id
+    # def get_tenant_id(self): # Removed
+    #     return self._tenant_id
 
     def get_history(self, window_size):
         convs = []

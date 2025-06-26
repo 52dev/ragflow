@@ -63,7 +63,7 @@ class Relevant(Generate, ABC):
             return Relevant.be_output(self._param.no)
         ans = "Documents: \n" + ans
         ans = f"Question: {q}\n" + ans
-        chat_mdl = LLMBundle(self._canvas.get_tenant_id(), LLMType.CHAT, self._param.llm_id)
+        chat_mdl = LLMBundle(LLMType.CHAT, self._param.llm_id) # tenant_id removed
 
         # Estimate character limit based on LLM's max_length (assuming 1 token ~ 4 chars)
         # Subtract a small buffer (e.g., 20 chars) for safety margin with prompts/roles.

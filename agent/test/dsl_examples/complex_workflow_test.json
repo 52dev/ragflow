@@ -4,7 +4,7 @@
             "obj": {
                 "component_name": "Begin",
                 "params": {
-                    "prologue": "Hello! This is a complex workflow test. What's your query?"
+                    "prologue": "Hello! This is a (revised) complex workflow test. What's your query?"
                 }
             },
             "downstream": ["answer_user_input"],
@@ -16,7 +16,7 @@
                 "component_name": "Answer",
                 "params": {}
             },
-            "downstream": ["retrieval_0", "keyword_0"],
+            "downstream": ["retrieval_0"],
             "upstream": ["begin"],
             "parent_id": ""
         },
@@ -26,35 +26,11 @@
                 "params": {
                     "tavily_api_key": "mock_tavily_key",
                     "use_kg": true,
-                    "empty_response": "No web/KG results found for your query."
+                    "empty_response": "No specific results found for your query via web/kg search."
                 }
             },
             "downstream": ["relevant_0"],
             "upstream": ["answer_user_input"],
-            "parent_id": ""
-        },
-        "keyword_0": {
-            "obj": {
-                "component_name": "KeywordExtract",
-                "params": {
-                    "llm_id": "mock_llm_for_keyword",
-                    "top_n": 1
-                }
-            },
-            "downstream": ["wikipedia_0"],
-            "upstream": ["answer_user_input"],
-            "parent_id": ""
-        },
-        "wikipedia_0": {
-            "obj": {
-                "component_name": "Wikipedia",
-                "params": {
-                    "lang": "en",
-                    "doc_max_len": 200
-                }
-            },
-            "downstream": ["relevant_0"],
-            "upstream": ["keyword_0"],
             "parent_id": ""
         },
         "relevant_0": {
@@ -62,15 +38,13 @@
                 "component_name": "Relevant",
                 "params": {
                     "llm_id": "mock_llm_for_relevance",
-                    "query": [
-                        {"component_id": "retrieval_0", "name": "Web/KG Results"}
-                    ],
-                    "yes": "go_to_A",
-                    "no": "go_to_B"
+                    "prompt": "Is the following document relevant to the user's most recent question? Document: {retrieval_0}",
+                    "yes": "relevant_path_selected",
+                    "no": "irrelevant_path_selected"
                 }
             },
             "downstream": ["switch_0"],
-            "upstream": ["retrieval_0", "wikipedia_0"],
+            "upstream": ["retrieval_0"],
             "parent_id": ""
         },
         "switch_0": {
@@ -81,45 +55,45 @@
                         {
                             "logical_operator": "and",
                             "items": [
-                                {"cpn_id": "relevant_0", "operator": "=", "value": "go_to_A"}
+                                {"cpn_id": "relevant_0", "operator": "=", "value": "relevant_path_selected"}
                             ],
-                            "to": "generate_A_wiki"
+                            "to": "generate_relevant_response"
                         },
                         {
                             "logical_operator": "and",
                             "items": [
-                                {"cpn_id": "relevant_0", "operator": "=", "value": "go_to_B"}
+                                {"cpn_id": "relevant_0", "operator": "=", "value": "irrelevant_path_selected"}
                             ],
-                            "to": "generate_B_retrieval"
+                            "to": "generate_general_response"
                         }
                     ],
                     "end_cpn_id": "answer_bot_output"
                 }
             },
-            "downstream": ["generate_A_wiki", "generate_B_retrieval"],
+            "downstream": ["generate_relevant_response", "generate_general_response"],
             "upstream": ["relevant_0"],
             "parent_id": ""
         },
-        "generate_A_wiki": {
+        "generate_relevant_response": {
             "obj": {
                 "component_name": "Generate",
                 "params": {
-                    "llm_id": "mock_llm_for_generate_A",
-                    "prompt": "Based on relevant Wikipedia content: {wikipedia_0}\nSummarize it regarding the query from user.",
-                    "cite": false
+                    "llm_id": "mock_llm_for_generate_relevant",
+                    "prompt": "Based on the relevant retrieved content: {retrieval_0}\nSummarize it in response to the user's query.",
+                    "cite": true
                 }
             },
             "downstream": ["answer_bot_output"],
             "upstream": ["switch_0"],
             "parent_id": ""
         },
-        "generate_B_retrieval": {
+        "generate_general_response": {
             "obj": {
                 "component_name": "Generate",
                 "params": {
-                    "llm_id": "mock_llm_for_generate_B",
-                    "prompt": "Wikipedia content was not relevant. Based on other findings: {retrieval_0}\nFormulate a response to the user query.",
-                    "cite": true
+                    "llm_id": "mock_llm_for_generate_general",
+                    "prompt": "The retrieved content was not deemed relevant. Please provide a general helpful response or ask for clarification regarding the user's query.",
+                    "cite": false
                 }
             },
             "downstream": ["answer_bot_output"],
@@ -132,7 +106,7 @@
                 "params": {}
             },
             "downstream": [],
-            "upstream": ["generate_A_wiki", "generate_B_retrieval"],
+            "upstream": ["generate_relevant_response", "generate_general_response"],
             "parent_id": ""
         }
     },
