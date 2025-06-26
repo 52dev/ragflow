@@ -373,3 +373,51 @@ The `Retrieval` component previously allowed specifying `kb_ids` to fetch conten
 
 ---
 *Further details on specific component parameters and advanced usage can be found by examining the component's source code in `agent/component/` and its corresponding parameter class (e.g., `GenerateParam` for `Generate`).*
+
+## Programmatic Workflow Creation (Workflow Builder API)
+
+For advanced users or automation, a Python API is available to programmatically construct and export workflow DSLs. This can be found in `agent/workflow_builder.py`.
+
+### Key Features:
+*   **Object-Oriented Design:** Define workflows using `Workflow` and `WorkflowNode` Python objects.
+*   **Helper Functions:** Easily add nodes, set parameters, and connect nodes.
+*   **DSL Export:** Convert your Python workflow definition into the executable JSON DSL format.
+*   **Component Listing:** List available components for use in your workflows.
+
+### Basic Usage Example:
+
+```python
+# From agent.test.test_workflow_builder import (example)
+from agent.workflow_builder import (
+    create_workflow,
+    add_node,
+    connect_nodes,
+    set_node_parameters,
+    list_available_components
+)
+
+# List components
+print(list_available_components())
+
+# Create a workflow
+wf = create_workflow(workflow_id="my_api_flow", description="Flow built via Python API")
+
+# Add nodes
+add_node(wf, "begin", "Begin", params={"prologue": "API Flow Started!"})
+add_node(wf, "user_in", "Answer")
+add_node(wf, "gen_response", "Generate", params={
+    "llm_id": "mock_llm",
+    "prompt": "User said: {user_in}. Respond."
+})
+add_node(wf, "bot_out", "Answer")
+
+# Connect nodes
+connect_nodes(wf, "begin", "user_in")
+connect_nodes(wf, "user_in", "gen_response")
+connect_nodes(wf, "gen_response", "bot_out")
+
+# Export to JSON DSL
+dsl_json = wf.to_dsl_json()
+print(dsl_json)
+```
+This API provides a more structured way to generate complex DSLs, especially useful for dynamic workflow generation or integration into other Python applications.

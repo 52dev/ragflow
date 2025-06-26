@@ -384,4 +384,58 @@ options:
 
 ---
 *关于特定组件参数和高级用法的更多详细信息，可以通过检查 `agent/component/` 中组件的源代码及其对应的参数类（例如, `Generate` 的 `GenerateParam`）来找到。*
+
+## 程序化工作流创建 (Workflow Builder API)
+*(Programmatic Workflow Creation (Workflow Builder API))*
+
+对于高级用户或自动化场景，我们提供了一个Python API，用于以编程方式构建和导出工作流DSL。该API位于 `agent/workflow_builder.py`。
+*(Machine translation for: For advanced users or automation, a Python API is available to programmatically construct and export workflow DSLs. This can be found in `agent/workflow_builder.py`.)*
+
+*(以下中文描述为英文内容的直接复制，需要人工翻译。代码示例和参数名保留英文。)*
+*(Machine translation for: The following Chinese descriptions are direct copies of the English content and require manual translation. Code examples and parameter names are kept in English.)*
+
+### 主要特性 (Key Features):
+*   **Object-Oriented Design:** Define workflows using `Workflow` and `WorkflowNode` Python objects.
+*   **Helper Functions:** Easily add nodes, set parameters, and connect nodes.
+*   **DSL Export:** Convert your Python workflow definition into the executable JSON DSL format.
+*   **Component Listing:** List available components for use in your workflows.
+
+### 基本用法示例 (Basic Usage Example):
+
+```python
+# From agent.test.test_workflow_builder import (example)
+from agent.workflow_builder import (
+    create_workflow,
+    add_node,
+    connect_nodes,
+    set_node_parameters,
+    list_available_components
+)
+
+# List components
+print(list_available_components())
+
+# Create a workflow
+wf = create_workflow(workflow_id="my_api_flow", description="Flow built via Python API")
+
+# Add nodes
+add_node(wf, "begin", "Begin", params={"prologue": "API Flow Started!"})
+add_node(wf, "user_in", "Answer")
+add_node(wf, "gen_response", "Generate", params={
+    "llm_id": "mock_llm",
+    "prompt": "User said: {user_in}. Respond."
+})
+add_node(wf, "bot_out", "Answer")
+
+# Connect nodes
+connect_nodes(wf, "begin", "user_in")
+connect_nodes(wf, "user_in", "gen_response")
+connect_nodes(wf, "gen_response", "bot_out")
+
+# Export to JSON DSL
+dsl_json = wf.to_dsl_json()
+print(dsl_json)
+```
+此API提供了一种更结构化的方式来生成复杂的DSL，特别适用于动态工作流生成或集成到其他Python应用程序中。
+*(Machine translation for: This API provides a more structured way to generate complex DSLs, especially useful for dynamic workflow generation or integration into other Python applications.)*
 *(Machine translation for: Further details on specific component parameters and advanced usage can be found by examining the component's source code in `agent/component/` and its corresponding parameter class (e.g., `GenerateParam` for `Generate`).)*
